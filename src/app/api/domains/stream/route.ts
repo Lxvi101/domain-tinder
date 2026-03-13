@@ -3,63 +3,58 @@ import { db } from "@/lib/db";
 import { preferences, swipe } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
-import { google } from "@ai-sdk/google";
-import { generateText, jsonSchema, stepCountIs } from "ai";
+import { createDeepInfra } from "@ai-sdk/deepinfra";
+import { generateText } from "ai";
+import { z } from "zod";
 import { isDomainAvailable } from "@/lib/rdap";
+
+const BATCH_SIZE = 15;
+const MAX_ROUNDS = 5;
+const TARGET_DOMAINS = 15;
 
 function buildPrompt(opts: {
   topic: string;
   interests: string[];
   tlds: string;
   mode: string;
-  swipedDomains: string[];
+  exclude: string[];
   likedDomains: string[];
   isForYou: boolean;
+  round: number;
 }) {
-  const { topic, interests, tlds, mode, swipedDomains, likedDomains, isForYou } = opts;
+  const { topic, interests, tlds, mode, exclude, likedDomains, isForYou, round } = opts;
 
   const modeDesc =
     mode === "bidomainial"
-      ? "SHORT domains: 4-8 chars before TLD. Single invented words, clever abbreviations, two-syllable portmanteaus. Like: vercel.com, stripe.com, plaid.com, figma.com"
-      : "COMPOUND domains: creative two-word combos, metaphors, descriptive phrases joined together. Like: openai.com, basecamp.com, mailchimp.com, cloudflare.com";
+      ? "SHORT domains: 4-8 chars. Single invented words, abbreviations, portmanteaus. Like: vercel.com, stripe.com, figma.com"
+      : "COMPOUND domains: two-word combos, metaphors, joined phrases. Like: openai.com, basecamp.com, mailchimp.com";
 
   const interestCtx =
-    interests.length > 0 ? `\nUser interests: ${interests.join(", ")}` : "";
+    interests.length > 0 ? `\nInterests: ${interests.join(", ")}` : "";
 
-  const excludeList =
-    swipedDomains.length > 0
-      ? `\nDo NOT suggest these already-seen domains: ${swipedDomains.slice(-80).join(", ")}`
+  const excludeStr =
+    exclude.length > 0 ? `\nEXCLUDE these: ${exclude.join(", ")}` : "";
+
+  const roundHint =
+    round > 0
+      ? `\nThis is round ${round + 1}. Previous suggestions were taken. Try MORE creative/unusual names.`
       : "";
 
   if (isForYou) {
-    return `The user has previously liked these domains:
-${likedDomains.slice(-30).join(", ")}
+    return `Generate ${BATCH_SIZE} brandable domain names inspired by these liked domains:
+${likedDomains.slice(-20).join(", ")}${interestCtx}
 
-Analyze the patterns, style, and industries of these liked domains. Generate NEW domain names that match similar vibes, industries, and naming styles.${interestCtx}
-
-Rules:
-- Use these TLDs: ${tlds}
-- Style: ${modeDesc}
-- For EVERY domain idea, call check_domain to verify it's available
-- If a domain is taken, try a variation or new name
-- Check at least 20 domains total
-- Be creative: portmanteaus, metaphors, invented words, verb-based names
-- Lowercase only, no spaces, no hyphens, no numbers
-- Easy to spell and pronounce${excludeList}`;
+TLDs: ${tlds} | Style: ${modeDesc}${roundHint}
+Lowercase, no hyphens, no numbers. Be creative.${excludeStr}
+Return ONLY: {"domains": ["domain1.com", ...]}`;
   }
 
-  return `Generate creative, brandable domain names for: "${topic}"${interestCtx}
+  return `Generate ${BATCH_SIZE} brandable domain names for: "${topic}"${interestCtx}
 
-Rules:
-- Use these TLDs: ${tlds}
-- Style: ${modeDesc}
-- For EVERY domain idea, call check_domain to verify it's available
-- If a domain is taken, try a variation or new name
-- Check at least 20 domains total
-- Techniques: portmanteaus, metaphors, modified words, invented words, verb-based, nature/science, domain hacks
-- Lowercase only, no spaces, no hyphens, no numbers
-- Easy to spell and pronounce
-- Avoid generic names like "smartapp.com" or "besttools.io"${excludeList}`;
+TLDs: ${tlds} | Style: ${modeDesc}${roundHint}
+Techniques: portmanteaus, metaphors, invented words, domain hacks.
+Lowercase, no hyphens, no numbers.${excludeStr}
+Return ONLY: {"domains": ["domain1.com", ...]}`;
 }
 
 export async function POST(request: Request) {
@@ -103,30 +98,16 @@ export async function POST(request: Request) {
       },
     });
     return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+      headers: sseHeaders(),
     });
   }
-
-  const prompt = buildPrompt({
-    topic,
-    interests,
-    tlds,
-    mode,
-    swipedDomains,
-    likedDomains,
-    isForYou,
-  });
 
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       const found: string[] = [];
-      const checked = new Set(swipedDomains);
+      const allChecked = new Set(swipedDomains);
 
       const send = (data: object) => {
         try {
@@ -134,60 +115,79 @@ export async function POST(request: Request) {
             encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
           );
         } catch {
-          // Controller may be closed
+          // closed
         }
       };
 
+      const deepinfra = createDeepInfra({
+        apiKey: process.env.DEEPINFRA_API_KEY,
+      });
+
       try {
-        await generateText({
-          model: google("gemini-2.0-flash"),
-          system:
-            "You are a domain naming consultant. For every domain you think of, you MUST call the check_domain tool. Never suggest a domain without checking first. Generate and check domains one at a time. Keep going until you run out of steps.",
-          prompt,
-          tools: {
-            check_domain: {
-              description:
-                "Check if a domain name is available for registration. You must call this for every domain idea.",
-              inputSchema: jsonSchema<{ domain: string }>({
-                type: "object",
-                properties: {
-                  domain: {
-                    type: "string",
-                    description: "Full domain name, e.g. example.com",
-                  },
-                },
-                required: ["domain"],
-              }),
-              execute: async ({ domain }) => {
-                const normalized = domain.toLowerCase().trim();
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+          if (request.signal?.aborted) break;
+          if (found.length >= TARGET_DOMAINS) break;
 
-                if (checked.has(normalized)) {
-                  return {
-                    domain: normalized,
-                    available: false,
-                    reason: "already checked",
-                  };
-                }
-                checked.add(normalized);
+          // Generate a batch of domain names
+          const prompt = buildPrompt({
+            topic,
+            interests,
+            tlds,
+            mode,
+            exclude: [...allChecked].slice(-60),
+            likedDomains,
+            isForYou,
+            round,
+          });
 
-                const available = await isDomainAvailable(normalized);
+          const { text } = await generateText({
+            model: deepinfra("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B"),
+            prompt,
+            abortSignal: request.signal,
+          });
 
-                if (available) {
-                  found.push(normalized);
-                  send({ domain: normalized });
-                }
+          // Parse domains from response
+          const trimmed = text.trim();
+          const jsonStr =
+            trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1] ?? trimmed;
 
-                return {
-                  domain: normalized,
-                  available,
-                  found_so_far: found.length,
-                };
-              },
-            },
-          },
-          stopWhen: stepCountIs(30),
-          abortSignal: request.signal,
-        });
+          let domains: string[] = [];
+          try {
+            const parsed = z
+              .object({ domains: z.array(z.string()) })
+              .safeParse(JSON.parse(jsonStr));
+            if (parsed.success) {
+              domains = parsed.data.domains;
+            }
+          } catch {
+            continue; // Bad response, try another round
+          }
+
+          // Filter out already-checked domains
+          const fresh = domains
+            .map((d) => d.toLowerCase().trim())
+            .filter((d) => !allChecked.has(d) && d.includes("."));
+
+          for (const d of fresh) allChecked.add(d);
+
+          if (fresh.length === 0) continue;
+
+          // Check ALL domains in parallel (fast!)
+          const results = await Promise.all(
+            fresh.map(async (domain) => ({
+              domain,
+              available: await isDomainAvailable(domain),
+            }))
+          );
+
+          // Stream available ones immediately
+          for (const r of results) {
+            if (r.available) {
+              found.push(r.domain);
+              send({ domain: r.domain });
+            }
+          }
+        }
       } catch (e) {
         if (!request.signal?.aborted) {
           send({ error: "generation-failed" });
@@ -197,17 +197,21 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch {
-          // Already closed
+          // closed
         }
       }
     },
   });
 
   return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
+    headers: sseHeaders(),
   });
+}
+
+function sseHeaders() {
+  return {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  };
 }

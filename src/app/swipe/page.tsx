@@ -218,13 +218,18 @@ export default function SwipePage() {
 
             {/* Swipe area */}
             <div className="flex-1 min-h-0">
-              {discover.domains.length > 0 || discover.isStreaming ? (
+              {discover.ready ? (
                 <SwipeDeck
                   domains={discover.domains}
                   onSwipe={handleDiscoverSwipe}
                   onRunningLow={handleDiscoverLow}
                   isStreaming={discover.isStreaming}
                 />
+              ) : discover.isStreaming ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <div className="w-10 h-10 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-white/40 text-sm animate-pulse">Generating domains...</p>
+                </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center px-8">
                   <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4">
@@ -269,7 +274,7 @@ export default function SwipePage() {
                     Start Discovering
                   </button>
                 </div>
-              ) : forYou.domains.length > 0 || forYou.isStreaming ? (
+              ) : forYou.ready ? (
                 <SwipeDeck
                   domains={forYou.domains}
                   onSwipe={handleForYouSwipe}
@@ -277,8 +282,9 @@ export default function SwipePage() {
                   isStreaming={forYou.isStreaming}
                 />
               ) : (
-                <div className="h-full flex items-center justify-center">
+                <div className="h-full flex flex-col items-center justify-center gap-3">
                   <div className="w-10 h-10 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-white/40 text-sm animate-pulse">Curating your feed...</p>
                 </div>
               )}
             </div>
