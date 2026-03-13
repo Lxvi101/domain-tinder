@@ -70,4 +70,5 @@ export const preferences = pgTable("preferences", {
     .unique(),
   tlds: text("tlds").notNull().default(".com"),
   mode: text("mode", { enum: ["bidomainial", "polydomainial"] }).notNull().default("bidomainial"),
+  interests: text("interests").notNull().default(""),
 });

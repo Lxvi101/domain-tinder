@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/deepinfra": "^2.0.39",
+    "@ai-sdk/google": "^3.0.43",
     "ai": "^6.0.116",
     "better-auth": "^1.5.5",
     "dotenv": "^17.3.1",

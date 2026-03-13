@@ -15,7 +15,9 @@ export async function GET() {
     where: eq(preferences.userId, session.user.id),
   });
 
-  return NextResponse.json(prefs || { tlds: ".com", mode: "bidomainial" });
+  return NextResponse.json(
+    prefs || { tlds: ".com", mode: "bidomainial", interests: "" }
+  );
 }
 
 export async function POST(request: Request) {
@@ -24,14 +26,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { tlds, mode } = await request.json();
+  const { tlds, mode, interests } = await request.json();
+
+  const data: Record<string, string> = {};
+  if (tlds !== undefined) data.tlds = tlds;
+  if (mode !== undefined) data.mode = mode;
+  if (interests !== undefined) data.interests = interests;
 
   await db
     .insert(preferences)
-    .values({ userId: session.user.id, tlds, mode })
+    .values({ userId: session.user.id, ...data })
     .onConflictDoUpdate({
       target: preferences.userId,
-      set: { tlds, mode },
+      set: data,
     });
 
   return NextResponse.json({ success: true });

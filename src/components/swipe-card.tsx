@@ -15,7 +15,7 @@ interface SwipeCardProps {
   isTop: boolean;
 }
 
-const SWIPE_THRESHOLD = 100;
+const SWIPE_THRESHOLD = 90;
 
 export const SwipeCard = memo(function SwipeCard({
   domain,
@@ -65,8 +65,7 @@ export const SwipeCard = memo(function SwipeCard({
     [handleMove]
   );
 
-  const rotation = offset * 0.06;
-  const cardOpacity = Math.max(0, 1 - Math.abs(offset) / 500);
+  const rotation = offset * 0.05;
   const stampOpacity = Math.min(1, Math.abs(offset) / SWIPE_THRESHOLD);
 
   const [name, ...tldParts] = domain.split(".");
@@ -75,16 +74,16 @@ export const SwipeCard = memo(function SwipeCard({
   return (
     <div
       className={`absolute inset-0 flex items-center justify-center ${
-        isTop ? "z-10" : "z-0"
+        isTop ? "z-10" : "z-0 pointer-events-none"
       }`}
       style={{
         transform: isTop
           ? `translateX(${offset}px) rotate(${rotation}deg)`
-          : "scale(0.95) translateY(10px)",
-        opacity: isTop ? cardOpacity : 0.5,
+          : "scale(0.92) translateY(8px)",
+        opacity: isTop ? 1 : 0.4,
         transition: isDragging
           ? "none"
-          : "transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s",
+          : "transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.35s",
         touchAction: "none",
       }}
       onTouchStart={isTop ? onTouchStart : undefined}
@@ -95,19 +94,15 @@ export const SwipeCard = memo(function SwipeCard({
       onMouseUp={isTop ? handleEnd : undefined}
       onMouseLeave={isTop && isDragging ? handleEnd : undefined}
     >
-      <div className="w-[85vw] max-w-[340px] bg-zinc-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col relative select-none border border-zinc-800">
-        {/* Gradient header */}
-        <div className="h-28 sm:h-32 bg-gradient-to-br from-rose-500 via-pink-500 to-orange-400 flex items-end justify-center relative shrink-0">
-          <div className="absolute inset-0 bg-black/10 mix-blend-overlay" />
-          <div className="bg-white/20 backdrop-blur-md px-4 py-1.5 rounded-full text-white/90 text-xs font-semibold tracking-wide border border-white/30 z-10 mb-3">
-            VERIFIED AVAILABLE
-          </div>
-        </div>
+      <div className="w-full max-w-sm mx-4 aspect-[3/4] max-h-[70vh] rounded-2xl overflow-hidden flex flex-col relative select-none border border-white/5 bg-black shadow-2xl shadow-black/50">
+        {/* Full-bleed gradient */}
+        <div className="absolute inset-0 bg-gradient-to-b from-rose-600/30 via-transparent to-black/80" />
+        <div className="absolute top-0 left-0 right-0 h-1/3 bg-gradient-to-br from-rose-500/20 via-purple-500/10 to-transparent" />
 
         {/* Stamps */}
         {offset > 0 && (
           <div
-            className="absolute top-6 left-4 border-4 border-emerald-400 text-emerald-400 font-black text-2xl sm:text-3xl px-2 py-0.5 rounded-lg rotate-[-15deg] z-50 tracking-widest uppercase"
+            className="absolute top-8 left-6 border-4 border-emerald-400 text-emerald-400 font-black text-3xl px-3 py-1 rounded-xl rotate-[-12deg] z-50 tracking-widest"
             style={{ opacity: stampOpacity }}
           >
             LIKE
@@ -115,30 +110,39 @@ export const SwipeCard = memo(function SwipeCard({
         )}
         {offset < 0 && (
           <div
-            className="absolute top-6 right-4 border-4 border-rose-500 text-rose-500 font-black text-2xl sm:text-3xl px-2 py-0.5 rounded-lg rotate-[15deg] z-50 tracking-widest uppercase"
+            className="absolute top-8 right-6 border-4 border-rose-500 text-rose-500 font-black text-3xl px-3 py-1 rounded-xl rotate-[12deg] z-50 tracking-widest"
             style={{ opacity: stampOpacity }}
           >
             NOPE
           </div>
         )}
 
-        {/* Domain display */}
-        <div className="flex-1 flex flex-col justify-center items-center px-5 py-6 text-center bg-zinc-900 min-h-0">
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-white break-all leading-tight tracking-tight">
+        {/* Content */}
+        <div className="relative flex-1 flex flex-col justify-center items-center px-6 text-center z-10">
+          {/* Verified badge */}
+          <div className="mb-6 flex items-center gap-1.5 bg-white/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span className="text-white/70 text-xs font-medium">
+              Verified available
+            </span>
+          </div>
+
+          <h2 className="text-4xl sm:text-5xl font-black text-white break-all leading-none tracking-tight">
             {name}
           </h2>
-          <span className="text-2xl sm:text-3xl text-rose-400 font-bold mt-1 opacity-90">
+          <span className="text-3xl sm:text-4xl text-rose-400 font-black mt-2">
             .{tld}
           </span>
+        </div>
 
-          <div className="mt-5 flex items-center gap-2 bg-zinc-800/50 px-3 py-1.5 rounded-full border border-zinc-700/50">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-            </span>
-            <span className="text-zinc-300 text-xs font-medium">
-              Ready to register
-            </span>
+        {/* Bottom gradient fade */}
+        <div className="relative z-10 px-6 pb-6 pt-4 bg-gradient-to-t from-black via-black/80 to-transparent">
+          <div className="flex items-center justify-between text-xs text-white/40">
+            <span>Swipe right to save</span>
+            <span className="font-mono">.{tld}</span>
           </div>
         </div>
       </div>
