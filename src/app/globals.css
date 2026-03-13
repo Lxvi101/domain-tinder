@@ -7,16 +7,24 @@
 
 * {
   -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   background: #09090b;
   color: #fafafa;
   font-family: var(--font-sans), system-ui, sans-serif;
   overscroll-behavior: none;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 @supports (height: 100dvh) {
+  .h-dvh {
+    height: 100dvh;
+  }
   .min-h-dvh {
     min-height: 100dvh;
   }

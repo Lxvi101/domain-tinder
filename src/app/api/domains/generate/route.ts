@@ -7,14 +7,26 @@ import { createDeepInfra } from "@ai-sdk/deepinfra";
 import { generateText } from "ai";
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import dns from "dns/promises";
 
 async function isDomainAvailable(domain: string): Promise<boolean> {
   try {
-    await dns.resolveAny(domain);
+    // Use RDAP (Registration Data Access Protocol) - the official ICANN replacement for WHOIS
+    // Returns 200 if domain is registered, 404 if available
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(`https://rdap.org/domain/${domain}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/rdap+json" },
+    });
+    clearTimeout(timeout);
+    // 200 = registered (not available), 404 = not found (available)
+    if (res.status === 404) return true;
+    if (res.ok) return false;
+    // For other status codes (rate limit, server error), be conservative
     return false;
   } catch {
-    return true;
+    // Network error or timeout - be conservative, mark as unavailable
+    return false;
   }
 }
 
@@ -43,25 +55,57 @@ export async function POST(request: Request) {
     apiKey: process.env.DEEPINFRA_API_KEY,
   });
 
+  const tldList = tlds.split(",").map((t: string) => t.trim());
+  const tldExamples = tldList.join(", ");
+
   const { text } = await generateText({
     model: deepinfra("nvidia/NVIDIA-Nemotron-3-Super-120B-A12B"),
-    prompt: `Generate 20 creative, catchy, and memorable domain name ideas for the topic: "${topic}".
+    prompt: `You are a world-class brand naming consultant and domain strategist. Generate 25 premium, highly brandable domain name ideas for: "${topic}".
 
-Rules:
-- Use these TLDs: ${tlds}
-- Mode: ${mode === "bidomainial" ? "Generate short, punchy single-word or two-word domains" : "Generate creative multi-word or compound domains"}
-- Make them brandable and easy to remember
-- Mix creative wordplay, portmanteaus, and clever combinations
-- Do NOT generate any of these already-seen domains: ${swipedDomains.join(", ")}
-- Return ONLY a valid JSON object with this exact format: {"domains": ["domain1.com", "domain2.com", ...]}`,
+DOMAIN STRATEGY RULES:
+- Use ONLY these TLDs: ${tldExamples}
+- Distribute suggestions across the selected TLDs
+- Every domain must be a PLAUSIBLE real domain (no spaces, no special chars, lowercase only)
+- ${mode === "bidomainial"
+  ? "Focus on SHORT domains: 4-8 characters before the TLD. Think: single invented words, clever abbreviations, two-syllable portmanteaus. Examples: vercel.com, stripe.com, plaid.com, figma.com, notion.so"
+  : "Focus on COMPOUND domains: creative two-word combos, metaphors, or descriptive phrases joined together. Think: openai.com, basecamp.com, airbnb.com, mailchimp.com, cloudflare.com"}
+
+NAMING TECHNIQUES TO USE:
+1. Portmanteaus (blend two relevant words): e.g., Pinterest = Pin + Interest
+2. Metaphorical names (evoke a feeling): e.g., Slack, Ripple, Bolt
+3. Modified real words (add/remove letters): e.g., Tumblr, Flickr, Lyft
+4. Invented words (phonetically pleasing): e.g., Kodak, Xerox, Spotify
+5. Verb-based names (imply action): e.g., Fetch, Gather, Zipline
+6. Nature/science inspired: e.g., Aurora, Quantum, Helix
+7. Domain hacks (use TLD as part of the word): e.g., del.icio.us, bit.ly
+
+QUALITY FILTERS:
+- Must be easy to spell when heard aloud
+- Must be easy to pronounce
+- Should feel modern and tech-forward
+- Avoid generic/boring names like "smartapp.com" or "besttools.io"
+- Avoid hyphens and numbers
+- Do NOT use any of these already-seen domains: ${swipedDomains.slice(-100).join(", ")}
+
+Return ONLY a valid JSON object: {"domains": ["domain1.com", "domain2.io", ...]}`,
   });
 
   const schema = z.object({
-    domains: z.array(z.string()).describe("Array of full domain names including TLD"),
+    domains: z.array(z.string()),
   });
   const trimmed = text.trim();
   const jsonStr = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1] ?? trimmed;
-  const parsed = schema.safeParse(JSON.parse(jsonStr));
+
+  let parsed;
+  try {
+    parsed = schema.safeParse(JSON.parse(jsonStr));
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to parse domain suggestions" },
+      { status: 500 }
+    );
+  }
+
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Failed to parse domain suggestions" },
@@ -70,16 +114,27 @@ Rules:
   }
   const object = parsed.data;
 
-  const availabilityChecks = await Promise.all(
-    object.domains.map(async (domain) => ({
-      domain,
-      available: await isDomainAvailable(domain),
-    }))
-  );
+  // Filter out already swiped domains first
+  const unswiped = object.domains.filter((d) => !swipedDomains.includes(d));
 
-  const availableDomains = availabilityChecks
-    .filter((d) => d.available && !swipedDomains.includes(d.domain))
-    .map((d) => d.domain);
+  // Check availability in parallel with concurrency limit
+  const BATCH_SIZE = 5;
+  const available: string[] = [];
 
-  return NextResponse.json({ domains: availableDomains });
+  for (let i = 0; i < unswiped.length; i += BATCH_SIZE) {
+    const batch = unswiped.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (domain) => ({
+        domain,
+        available: await isDomainAvailable(domain),
+      }))
+    );
+    for (const r of results) {
+      if (r.available) available.push(r.domain);
+    }
+    // Stop early if we have enough
+    if (available.length >= 10) break;
+  }
+
+  return NextResponse.json({ domains: available });
 }

@@ -36,3 +36,24 @@ export async function GET() {
 
   return NextResponse.json({ domains: liked.map((s) => s.domain) });
 }
+
+export async function DELETE(request: Request) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { domain } = await request.json();
+
+  await db
+    .delete(swipe)
+    .where(
+      and(
+        eq(swipe.userId, session.user.id),
+        eq(swipe.domain, domain),
+        eq(swipe.direction, "right")
+      )
+    );
+
+  return NextResponse.json({ success: true });
+}
