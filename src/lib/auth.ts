@@ -11,4 +11,8 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  trustedOrigins: [
+    "https://domaintinder.com",
+    "https://www.domaintinder.com",
+  ],
 });
